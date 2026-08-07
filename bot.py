@@ -1,7 +1,10 @@
-
+import os
 import requests
 
 print("Kripto Sinyal Botu başlatıldı")
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 coins = {
     "bitcoin": "BTC",
@@ -30,28 +33,45 @@ try:
     response.raise_for_status()
     data = response.json()
 
+    mesaj = "📊 KRİPTO SİNYALLERİ\n\n"
+
     for coin_id, symbol in coins.items():
         coin = data.get(coin_id)
 
         if not coin:
-            print(symbol, "verisi alınamadı")
             continue
 
         price = coin.get("usd")
         change = coin.get("usd_24h_change", 0)
 
         if change >= 2:
-            signal = "LONG AĞIRLIKLI"
+            signal = "🟢 LONG AĞIRLIKLI"
         elif change <= -2:
-            signal = "SHORT AĞIRLIKLI"
+            signal = "🔴 SHORT AĞIRLIKLI"
         else:
-            signal = "BEKLE"
+            signal = "⚪ BEKLE"
 
-        print(
-            f"{symbol}: ${price} | "
-            f"24s: {change:.2f}% | "
-            f"Sinyal: {signal}"
+        mesaj += (
+            f"{symbol}: ${price}\n"
+            f"24s: {change:.2f}%\n"
+            f"Sinyal: {signal}\n\n"
         )
 
+    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+    telegram_response = requests.post(
+        telegram_url,
+        data={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": mesaj
+        },
+        timeout=20
+    )
+
+    telegram_response.raise_for_status()
+
+    print("Telegram mesajı gönderildi.")
+
 except Exception as e:
-    print("Veri alınırken hata oluştu:", e)
+    print("Hata:", e)
+    raise
