@@ -10,7 +10,7 @@ API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_SECRET_KEY")
 
 client = Client(API_KEY, API_SECRET)
-
+client.API_URL = "https://api.binance.com"
 coins = [
     "GRTUSDT",
     "ARBUSDT",
