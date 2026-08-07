@@ -1,33 +1,57 @@
-import os
-from dotenv import load_dotenv
-from binance.client import Client
 
-load_dotenv()
+import requests
 
 print("Kripto Sinyal Botu başlatıldı")
 
-API_KEY = os.getenv("BINANCE_API_KEY")
-API_SECRET = os.getenv("BINANCE_SECRET_KEY")
+coins = {
+    "bitcoin": "BTC",
+    "ethereum": "ETH",
+    "avalanche-2": "AVAX",
+    "dogecoin": "DOGE",
+    "ripple": "XRP",
+    "arbitrum": "ARB",
+    "aptos": "APT",
+    "the-graph": "GRT",
+    "theta-token": "THETA",
+    "ondo-finance": "ONDO",
+    "apecoin": "APE"
+}
 
-client = Client(API_KEY, API_SECRET)
-client.API_URL = "https://api.binance.com"
-coins = [
-    "GRTUSDT",
-    "ARBUSDT",
-    "AVAXUSDT",
-    "HOTUSDT",
-    "TLMUSDT",
-    "APTUSDT",
-    "XRPUSDT",
-    "TAOUSDT",
-    "ONDOUSDT",
-    "APEUSDT",
-    "DOGEUSDT"
-]
+url = "https://api.coingecko.com/api/v3/simple/price"
 
-for coin in coins:
-    try:
-        fiyat = client.get_symbol_ticker(symbol=coin)
-        print(coin, ":", fiyat["price"])
-    except Exception as e:
-        print(coin, "hata:", e)
+params = {
+    "ids": ",".join(coins.keys()),
+    "vs_currencies": "usd",
+    "include_24hr_change": "true"
+}
+
+try:
+    response = requests.get(url, params=params, timeout=20)
+    response.raise_for_status()
+    data = response.json()
+
+    for coin_id, symbol in coins.items():
+        coin = data.get(coin_id)
+
+        if not coin:
+            print(symbol, "verisi alınamadı")
+            continue
+
+        price = coin.get("usd")
+        change = coin.get("usd_24h_change", 0)
+
+        if change >= 2:
+            signal = "LONG AĞIRLIKLI"
+        elif change <= -2:
+            signal = "SHORT AĞIRLIKLI"
+        else:
+            signal = "BEKLE"
+
+        print(
+            f"{symbol}: ${price} | "
+            f"24s: {change:.2f}% | "
+            f"Sinyal: {signal}"
+        )
+
+except Exception as e:
+    print("Veri alınırken hata oluştu:", e)
