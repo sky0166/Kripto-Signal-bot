@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-bot:
+  calistir-bot:
     runs-on: ubuntu-latest
 
     steps:
       - name: Kodları indir
         uses: actions/checkout@v4
 
-      - name: Python kur
+      - name: Python kurulumu
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -28,5 +28,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "🔥 YENİ BOT TESTİ 🔥"
+          echo "Bot dosyası kontrol ediliyor..."
           head -n 5 bot.py
+          echo "Bot başlatılıyor..."
           python bot.py
