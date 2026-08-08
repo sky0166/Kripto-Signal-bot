@@ -22,10 +22,11 @@ jobs:
       - name: Paketleri yükle
         run: |
           pip install -r requirements.txt
-
-      - name: Botu çalıştır
+                - name: Botu çalıştır
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          echo "🔥 YENİ BOT TESTİ 🔥"
+          head -n 5 bot.py
           python bot.py
