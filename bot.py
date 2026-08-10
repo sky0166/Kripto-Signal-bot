@@ -37,6 +37,7 @@ INTERVAL = "4h"
 LIMIT = 250
 
 BINANCE_URL = "https://api-gcp.binance.com/api/v3/klines"
+print("🔎 KULLANILAN BINANCE ADRESİ:", BINANCE_URL)
 
 # =========================================================
 # BINANCE VERİSİ
