@@ -36,7 +36,7 @@ SYMBOLS = [
 INTERVAL = "4h"
 LIMIT = 250
 
-BINANCE_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_URL = BINANCE_URL = "https://data-api.binance.vision/api/v3/klines"
 
 # =========================================================
 # BINANCE VERİSİ
