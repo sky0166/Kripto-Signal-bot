@@ -1,420 +1,372 @@
 import os
+import time
 import requests
-import math
+import pandas as pd
 from datetime import datetime, timezone
 
-print("🚀 GELİŞMİŞ KRİPTO SİNYAL BOTU BAŞLATILDI")
-
-# =========================================================
-# TELEGRAM
-# =========================================================
+# ============================================================
+# GELİŞMİŞ KRİPTO SİNYAL BOTU
+# Veri kaynağı: CoinGecko
+# Zaman dilimi: 4 Saat
+# Telegram bildirimleri: Aktif
+# ============================================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise RuntimeError("TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID bulunamadı.")
+# CoinGecko ID -> Binance sembolü
+COINS = {
+    "bitcoin": "BTCUSDT",
+    "ethereum": "ETHUSDT",
+    "avalanche-2": "AVAXUSDT",
+    "dogecoin": "DOGEUSDT",
+    "ripple": "XRPUSDT",
+    "arbitrum": "ARBUSDT",
+    "aptos": "APTUSDT",
+    "the-graph": "GRTUSDT",
+    "theta-token": "THETAUSDT",
+    "ondo-finance": "ONDOUSDT",
+    "apecoin": "APEUSDT",
+}
 
-# =========================================================
-# AYARLAR
-# =========================================================
 
-SYMBOLS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "AVAXUSDT",
-    "DOGEUSDT",
-    "XRPUSDT",
-    "ARBUSDT",
-    "APTUSDT",
-    "GRTUSDT",
-    "THETAUSDT",
-    "ONDOUSDT",
-    "APEUSDT"
-]
+def get_market_data(coin_id):
+    """CoinGecko'dan yaklaşık 4 saatlik mum verisi oluşturur."""
 
-INTERVAL = "4h"
-LIMIT = 250
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
 
-BINANCE_URL = "https://api-gcp.binance.com/api/v3/klines"
-print("🔎 KULLANILAN BINANCE ADRESİ:", BINANCE_URL)
+    params = {
+        "vs_currency": "usd",
+        "days": "90",
+        "interval": "hourly"
+    }
 
-# =========================================================
-# BINANCE VERİSİ
-# =========================================================
-
-def get_klines(symbol):
     response = requests.get(
-        BINANCE_URL,
-        params={
-            "symbol": symbol,
-            "interval": INTERVAL,
-            "limit": LIMIT
-        },
-        timeout=20
+        url,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        }
     )
 
     response.raise_for_status()
-    return response.json()
+
+    data = response.json()
+
+    if "prices" not in data or len(data["prices"]) < 100:
+        raise Exception("Yeterli piyasa verisi alınamadı.")
+
+    # Fiyat verisini DataFrame'e çevir
+    df = pd.DataFrame(
+        data["prices"],
+        columns=["timestamp", "close"]
+    )
+
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"],
+        unit="ms",
+        utc=True
+    )
+
+    df = df.set_index("timestamp")
+
+    # Saatlik veriyi 4 saatliğe dönüştür
+    df = df["close"].resample("4h").last().dropna()
+
+    if len(df) < 60:
+        raise Exception("4 saatlik analiz için yeterli veri yok.")
+
+    return df
 
 
-# =========================================================
-# EMA
-# =========================================================
+def calculate_indicators(df):
+    """Teknik göstergeleri hesaplar."""
 
-def ema(values, period):
-    if len(values) < period:
-        return None
+    close = df.copy()
 
-    multiplier = 2 / (period + 1)
+    # EMA
+    close["EMA20"] = close["close"].ewm(
+        span=20,
+        adjust=False
+    ).mean()
 
-    result = sum(values[:period]) / period
+    close["EMA50"] = close["close"].ewm(
+        span=50,
+        adjust=False
+    ).mean()
 
-    for price in values[period:]:
-        result = (price - result) * multiplier + result
+    close["EMA200"] = close["close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
 
-    return result
+    # RSI 14
+    delta = close["close"].diff()
 
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
-# =========================================================
-# RSI
-# =========================================================
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
 
-def rsi(values, period=14):
-    if len(values) <= period:
-        return None
+    rs = avg_gain / avg_loss.replace(0, 1e-10)
 
-    gains = []
-    losses = []
+    close["RSI"] = 100 - (
+        100 / (1 + rs)
+    )
 
-    for i in range(1, len(values)):
-        change = values[i] - values[i - 1]
+    # MACD
+    ema12 = close["close"].ewm(
+        span=12,
+        adjust=False
+    ).mean()
 
-        if change > 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
+    ema26 = close["close"].ewm(
+        span=26,
+        adjust=False
+    ).mean()
 
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
+    close["MACD"] = ema12 - ema26
 
-    for i in range(period, len(gains)):
-        avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
-        avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
+    close["MACD_SIGNAL"] = close["MACD"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
 
-    if avg_loss == 0:
-        return 100
+    # Momentum
+    close["MOMENTUM"] = close["close"].pct_change(6) * 100
 
-    rs = avg_gain / avg_loss
-
-    return 100 - (100 / (1 + rs))
-
-
-# =========================================================
-# MACD
-# =========================================================
-
-def calculate_macd(values):
-    ema12 = ema(values, 12)
-    ema26 = ema(values, 26)
-
-    if ema12 is None or ema26 is None:
-        return None, None
-
-    macd = ema12 - ema26
-
-    # Basit MACD yön teyidi
-    return macd, ema12
+    return close
 
 
-# =========================================================
-# ANALİZ
-# =========================================================
+def generate_signal(df, symbol):
+    """LONG / SHORT / BEKLE sinyali üretir."""
 
-def analyze(symbol):
+    latest = df.iloc[-1]
 
-    candles = get_klines(symbol)
-
-    closes = [float(x[4]) for x in candles]
-    highs = [float(x[2]) for x in candles]
-    lows = [float(x[3]) for x in candles]
-    volumes = [float(x[5]) for x in candles]
-
-    price = closes[-1]
-
-    ema20 = ema(closes, 20)
-    ema50 = ema(closes, 50)
-    ema200 = ema(closes, 200)
-
-    rsi_value = rsi(closes, 14)
-
-    macd_value, _ = calculate_macd(closes)
-
-    if not all([ema20, ema50, ema200, rsi_value is not None, macd_value is not None]):
-        return None
-
-    # -----------------------------------------------------
-    # HACİM
-    # -----------------------------------------------------
-
-    average_volume = sum(volumes[-20:]) / 20
-    current_volume = volumes[-1]
-
-    volume_ratio = current_volume / average_volume if average_volume else 0
-
-    # -----------------------------------------------------
-    # PUAN SİSTEMİ
-    # -----------------------------------------------------
+    price = latest["close"]
+    ema20 = latest["EMA20"]
+    ema50 = latest["EMA50"]
+    ema200 = latest["EMA200"]
+    rsi = latest["RSI"]
+    macd = latest["MACD"]
+    macd_signal = latest["MACD_SIGNAL"]
+    momentum = latest["MOMENTUM"]
 
     long_score = 0
     short_score = 0
 
-    reasons_long = []
-    reasons_short = []
-
-    # EMA20 / EMA50
+    # Trend
     if price > ema20:
-        long_score += 15
-        reasons_long.append("Fiyat EMA20 üstünde")
-
+        long_score += 1
     else:
-        short_score += 15
-        reasons_short.append("Fiyat EMA20 altında")
+        short_score += 1
 
     if ema20 > ema50:
-        long_score += 15
-        reasons_long.append("EMA20 > EMA50")
-
+        long_score += 1
     else:
-        short_score += 15
-        reasons_short.append("EMA20 < EMA50")
+        short_score += 1
 
-    # EMA200 ana trend
     if price > ema200:
-        long_score += 20
-        reasons_long.append("Ana trend yukarı")
-
+        long_score += 1
     else:
-        short_score += 20
-        reasons_short.append("Ana trend aşağı")
+        short_score += 1
 
     # RSI
-    if 50 < rsi_value < 70:
-        long_score += 15
-        reasons_long.append("RSI yükseliş bölgesinde")
+    if 50 <= rsi <= 70:
+        long_score += 1
 
-    elif 30 < rsi_value < 50:
-        short_score += 15
-        reasons_short.append("RSI düşüş bölgesinde")
-
-    elif rsi_value >= 70:
-        short_score += 5
-        reasons_short.append("RSI aşırı alım")
-
-    elif rsi_value <= 30:
-        long_score += 5
-        reasons_long.append("RSI aşırı satım")
+    if 30 <= rsi < 50:
+        short_score += 1
 
     # MACD
-    if macd_value > 0:
-        long_score += 15
-        reasons_long.append("MACD pozitif")
-
+    if macd > macd_signal:
+        long_score += 1
     else:
-        short_score += 15
-        reasons_short.append("MACD negatif")
+        short_score += 1
 
-    # Hacim
-    if volume_ratio >= 1.20:
-        if long_score > short_score:
-            long_score += 20
-            reasons_long.append("Hacim güçlü")
+    # Momentum
+    if momentum > 0:
+        long_score += 1
+    else:
+        short_score += 1
 
-        elif short_score > long_score:
-            short_score += 20
-            reasons_short.append("Hacim güçlü")
-
-    # -----------------------------------------------------
-    # SİNYAL
-    # -----------------------------------------------------
-
-    if long_score >= 70 and long_score > short_score:
-        signal = "🟢 GÜÇLÜ LONG"
-        score = long_score
-        direction = "LONG"
-        reasons = reasons_long
-
-    elif long_score >= 55 and long_score > short_score:
+    # Sinyal
+    if long_score >= 5 and long_score > short_score:
         signal = "🟢 LONG"
-        score = long_score
-        direction = "LONG"
-        reasons = reasons_long
-
-    elif short_score >= 70 and short_score > long_score:
-        signal = "🔴 GÜÇLÜ SHORT"
-        score = short_score
-        direction = "SHORT"
-        reasons = reasons_short
-
-    elif short_score >= 55 and short_score > long_score:
+        confidence = long_score
+    elif short_score >= 5 and short_score > long_score:
         signal = "🔴 SHORT"
-        score = short_score
-        direction = "SHORT"
-        reasons = reasons_short
-
+        confidence = short_score
     else:
-        signal = "⚪ BEKLE"
-        score = max(long_score, short_score)
-        direction = "WAIT"
-        reasons = []
+        signal = "🟡 BEKLE"
+        confidence = max(long_score, short_score)
 
-    # -----------------------------------------------------
-    # ATR BENZERİ VOLATİLİTE HESABI
-    # -----------------------------------------------------
-
-    ranges = []
-
-    for i in range(-14, 0):
-        ranges.append(highs[i] - lows[i])
-
-    average_range = sum(ranges) / len(ranges)
-
-    # Stop mesafesi
-    stop_distance = average_range * 1.5
-
-    if direction == "LONG":
-
-        stop = price - stop_distance
-
-        tp1 = price + stop_distance * 1.5
-        tp2 = price + stop_distance * 2.5
-        tp3 = price + stop_distance * 4
-
-    elif direction == "SHORT":
-
-        stop = price + stop_distance
-
-        tp1 = price - stop_distance * 1.5
-        tp2 = price - stop_distance * 2.5
-        tp3 = price - stop_distance * 4
-
+    # RSI durumunu belirle
+    if rsi >= 70:
+        rsi_status = "Aşırı alım"
+    elif rsi <= 30:
+        rsi_status = "Aşırı satım"
     else:
+        rsi_status = "Normal"
 
-        stop = None
-        tp1 = None
-        tp2 = None
-        tp3 = None
-
-    return {
-        "symbol": symbol.replace("USDT", ""),
+    result = {
+        "symbol": symbol,
         "price": price,
         "signal": signal,
-        "score": score,
-        "rsi": rsi_value,
+        "confidence": confidence,
+        "rsi": rsi,
+        "rsi_status": rsi_status,
         "ema20": ema20,
         "ema50": ema50,
         "ema200": ema200,
-        "macd": macd_value,
-        "volume_ratio": volume_ratio,
-        "direction": direction,
-        "stop": stop,
-        "tp1": tp1,
-        "tp2": tp2,
-        "tp3": tp3,
-        "reasons": reasons
+        "macd": macd,
+        "macd_signal": macd_signal,
+        "momentum": momentum,
     }
 
+    return result
 
-# =========================================================
-# TELEGRAM MESAJI
-# =========================================================
+
+def format_signal(result):
+    """Telegram mesajını hazırlar."""
+
+    return (
+        f"{result['signal']} {result['symbol']}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Fiyat: ${result['price']:.6f}\n"
+        f"📊 Güven skoru: {result['confidence']}/6\n"
+        f"📈 RSI(14): {result['rsi']:.2f} ({result['rsi_status']})\n"
+        f"📉 EMA20: ${result['ema20']:.6f}\n"
+        f"📉 EMA50: ${result['ema50']:.6f}\n"
+        f"📉 EMA200: ${result['ema200']:.6f}\n"
+        f"〽️ MACD: {result['macd']:.6f}\n"
+        f"〽️ MACD Signal: {result['macd_signal']:.6f}\n"
+        f"🚀 Momentum: {result['momentum']:.2f}%\n"
+        f"⏱ Zaman dilimi: 4H\n"
+    )
+
 
 def send_telegram(message):
+    """Telegram'a mesaj gönderir."""
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ Telegram Secret bilgileri bulunamadı.")
+        return False
+
+    url = (
+        f"https://api.telegram.org/bot"
+        f"{TELEGRAM_TOKEN}/sendMessage"
+    )
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
 
     response = requests.post(
         url,
-        data={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message
-        },
-        timeout=20
+        json=payload,
+        timeout=30
     )
 
     response.raise_for_status()
 
+    return True
 
-# =========================================================
-# ANA PROGRAM
-# =========================================================
 
-results = []
+def main():
 
-for symbol in SYMBOLS:
+    print("🚀 GELİŞMİŞ KRİPTO SİNYAL BOTU BAŞLATILDI")
+    print("📡 Veri kaynağı: CoinGecko")
+    print("⏱ Zaman dilimi: 4H")
+    print("")
+
+    results = []
+
+    for coin_id, symbol in COINS.items():
+
+        try:
+            print(f"🔎 {symbol} analiz ediliyor...")
+
+            df = get_market_data(coin_id)
+
+            df = calculate_indicators(df)
+
+            result = generate_signal(df, symbol)
+
+            results.append(result)
+
+            print(
+                f"{symbol}: "
+                f"{result['signal']} | "
+                f"RSI {result['rsi']:.2f} | "
+                f"Skor {result['confidence']}/6"
+            )
+
+            # API'yi gereksiz zorlamamak için kısa bekleme
+            time.sleep(1)
+
+        except Exception as e:
+
+            print(
+                f"❌ {symbol} hata: {e}"
+            )
+
+    print("")
+    print("📊 Analiz tamamlandı.")
+
+    # Telegram özeti
+    now = datetime.now(timezone.utc).strftime(
+        "%d.%m.%Y %H:%M UTC"
+    )
+
+    header = (
+        "🚀 KRİPTO SİNYAL BOTU\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {now}\n"
+        "⏱ 4 Saatlik Analiz\n"
+        "📡 CoinGecko piyasa verisi\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    if results:
+
+        messages = [header]
+
+        for result in results:
+            messages.append(
+                format_signal(result)
+            )
+
+        messages.append(
+            "\n⚠️ Bu sinyaller teknik analiz "
+            "verilerine dayanır. Finansal tavsiye değildir."
+        )
+
+        telegram_message = "\n".join(messages)
+
+    else:
+
+        telegram_message = (
+            header +
+            "❌ Hiçbir coin için veri alınamadı."
+        )
 
     try:
 
-        result = analyze(symbol)
+        if send_telegram(telegram_message):
+            print("✅ Telegram mesajı gönderildi.")
 
-        if result:
-            results.append(result)
+    except Exception as e:
 
-        print(f"{symbol} analiz edildi.")
+        print(
+            f"❌ Telegram gönderim hatası: {e}"
+        )
 
-    except Exception as error:
-
-        print(f"{symbol} hata: {error}")
-
-
-# =========================================================
-# TELEGRAM RAPORU
-# =========================================================
-
-now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-message = f"🚀 KRİPTO SİNYAL MERKEZİ\n"
-message += f"⏱️ Zaman Dilimi: 4 SAAT\n"
-message += f"🕐 {now}\n"
-message += "━━━━━━━━━━━━━━━━━━\n\n"
-
-for result in results:
-
-    message += f"💎 {result['symbol']}/USDT\n"
-    message += f"💰 Fiyat: {result['price']:.8g}\n"
-    message += f"📊 Sinyal: {result['signal']}\n"
-    message += f"🎯 Skor: {result['score']}/100\n"
-    message += f"📈 RSI: {result['rsi']:.2f}\n"
-    message += f"EMA20: {result['ema20']:.8g}\n"
-    message += f"EMA50: {result['ema50']:.8g}\n"
-    message += f"EMA200: {result['ema200']:.8g}\n"
-    message += f"📦 Hacim: {result['volume_ratio']:.2f}x\n"
-
-    if result["direction"] != "WAIT":
-
-        message += "\n🎯 İŞLEM PLANI\n"
-        message += f"📍 Giriş: {result['price']:.8g}\n"
-        message += f"🛑 Stop: {result['stop']:.8g}\n"
-        message += f"🥇 TP1: {result['tp1']:.8g}\n"
-        message += f"🥈 TP2: {result['tp2']:.8g}\n"
-        message += f"🥉 TP3: {result['tp3']:.8g}\n"
-
-        if result["reasons"]:
-
-            message += "\n🧠 TEYİTLER\n"
-
-            for reason in result["reasons"][:5]:
-                message += f"• {reason}\n"
-
-    message += "\n━━━━━━━━━━━━━━━━━━\n\n"
+    print("🚀 Analiz tamamlandı.")
 
 
-if not results:
-    message += "⚠️ Veri alınamadı."
-
-send_telegram(message)
-
-print("✅ Telegram mesajı gönderildi.")
-print("🚀 Analiz tamamlandı.")
+if __name__ == "__main__":
+    main()
