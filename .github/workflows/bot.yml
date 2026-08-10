@@ -6,12 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  calistir-bot:
+  kalistir-bot:
     runs-on: ubuntu-latest
 
     steps:
       - name: Kodları indir
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Python kurulumu
         uses: actions/setup-python@v5
@@ -22,13 +24,23 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Kod kontrolü
+        run: |
+          echo "================================"
+          echo "🔎 ÇALIŞAN COMMIT:"
+          git rev-parse HEAD
+          echo "================================"
+          echo "🔎 BINANCE ADRESİ:"
+          grep "BINANCE_URL" bot.py
+          echo "================================"
+          echo "🔎 BOT DOSYASININ İLK SATIRLARI:"
+          head -n 10 bot.py
+          echo "================================"
+
       - name: Botu çalıştır
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "🔥 YENİ BOT TESTİ 🔥"
-          echo "Bot dosyası kontrol ediliyor..."
-          head -n 5 bot.py
-          echo "Bot başlatılıyor..."
+          echo "🔥 BOT BAŞLATILIYOR 🔥"
           python bot.py
