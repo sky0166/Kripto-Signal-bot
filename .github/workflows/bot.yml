@@ -1,46 +1,31 @@
 name: Kripto Sinyal Botu
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
+  schedule:
+    - cron: "0 */2 * * *"
 
 jobs:
-  kalistir-bot:
+  calistir-bot:
     runs-on: ubuntu-latest
 
     steps:
       - name: Kodları indir
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Python kurulumu
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
       - name: Paketleri yükle
         run: |
-          pip install -r requirements.txt
-
-      - name: Kod kontrolü
-        run: |
-          echo "================================"
-          echo "🔎 ÇALIŞAN COMMIT:"
-          git rev-parse HEAD
-          echo "================================"
-          echo "🔎 BINANCE ADRESİ:"
-          grep "BINANCE_URL" bot.py
-          echo "================================"
-          echo "🔎 BOT DOSYASININ İLK SATIRLARI:"
-          head -n 10 bot.py
-          echo "================================"
+          python -m pip install --upgrade pip
+          pip install requests pandas
 
       - name: Botu çalıştır
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "🔥 BOT BAŞLATILIYOR 🔥"
           python bot.py
